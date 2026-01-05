@@ -1,19 +1,65 @@
 import Foundation
 
 class MarkdownConverter {
-    static func toHTML(_ markdown: String) -> String {
+    static func toHTML(_ markdown: String, noteId: String = "unknown") -> String {
+        // Check cache first
+        if let cachedHTML = MarkdownCacheManager.shared.getCachedHTML(for: markdown, noteId: noteId) {
+            return cachedHTML
+        }
+        
+        // Use improved markdown parsing
+        let bodyHTML = parseMarkdownToHTML(markdown)
+        
+        // Wrap in complete HTML document
+        let completeHTML = wrapInHTMLDocument(bodyHTML)
+        
+        // Cache the result
+        MarkdownCacheManager.shared.cacheHTML(completeHTML, for: markdown, noteId: noteId)
+        
+        return completeHTML
+    }
+    
+    private static func parseMarkdownToHTML(_ markdown: String) -> String {
         var html = markdown
         
+        // Process in order to avoid conflicts
+        html = convertCodeBlocks(html)
+        html = convertInlineCode(html)
         html = convertHeaders(html)
         html = convertBold(html)
         html = convertItalic(html)
-        html = convertCode(html)
+        html = convertStrikethrough(html)
         html = convertLinks(html)
         html = convertImages(html)
         html = convertLists(html)
+        html = convertTables(html)
+        html = convertBlockquotes(html)
+        html = convertHorizontalRules(html)
         html = convertParagraphs(html)
         
-        return wrapInHTMLDocument(html)
+        return html
+    }
+    
+    private static func convertCodeBlocks(_ text: String) -> String {
+        // Handle fenced code blocks first (```code```)
+        let pattern = #"```(\w+)?\n(.*?)\n```"#
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
+        let range = NSRange(location: 0, length: text.count)
+        
+        return regex.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: range,
+            withTemplate: "<pre><code class=\"language-$1\">$2</code></pre>"
+        )
+    }
+    
+    private static func convertInlineCode(_ text: String) -> String {
+        return text.replacingOccurrences(
+            of: #"`([^`]+)`"#,
+            with: "<code>$1</code>",
+            options: .regularExpression
+        )
     }
     
     private static func convertHeaders(_ text: String) -> String {
@@ -48,60 +94,194 @@ class MarkdownConverter {
     }
     
     private static func convertBold(_ text: String) -> String {
-        return text.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "<strong>$1</strong>", options: .regularExpression)
+        return text.replacingOccurrences(
+            of: #"\*\*([^*]+)\*\*"#,
+            with: "<strong>$1</strong>",
+            options: .regularExpression
+        )
     }
     
     private static func convertItalic(_ text: String) -> String {
-        return text.replacingOccurrences(of: #"\*(.+?)\*"#, with: "<em>$1</em>", options: .regularExpression)
+        return text.replacingOccurrences(
+            of: #"\*([^*]+)\*"#,
+            with: "<em>$1</em>",
+            options: .regularExpression
+        )
     }
     
-    private static func convertCode(_ text: String) -> String {
-        var result = text.replacingOccurrences(of: #"`(.+?)`"#, with: "<code>$1</code>", options: .regularExpression)
-        
-        result = result.replacingOccurrences(of: #"```(.+?)```"#, with: "<pre><code>$1</code></pre>", options: .regularExpression)
-        
-        return result
+    private static func convertStrikethrough(_ text: String) -> String {
+        return text.replacingOccurrences(
+            of: #"~~([^~]+)~~"#,
+            with: "<del>$1</del>",
+            options: .regularExpression
+        )
     }
     
     private static func convertLinks(_ text: String) -> String {
-        return text.replacingOccurrences(of: #"\[(.+?)\]\((.+?)\)"#, with: "<a href=\"$2\">$1</a>", options: .regularExpression)
+        return text.replacingOccurrences(
+            of: #"\[([^\]]+)\]\(([^)]+)\)"#,
+            with: "<a href=\"$2\">$1</a>",
+            options: .regularExpression
+        )
     }
     
     private static func convertImages(_ text: String) -> String {
-        return text.replacingOccurrences(of: #"!\[(.+?)\]\((.+?)\)"#, with: "<img src=\"$2\" alt=\"$1\">", options: .regularExpression)
+        return text.replacingOccurrences(
+            of: #"!\[([^\]]*)\]\(([^)]+)\)"#,
+            with: "<img src=\"$2\" alt=\"$1\">",
+            options: .regularExpression
+        )
     }
     
     private static func convertLists(_ text: String) -> String {
         let lines = text.components(separatedBy: .newlines)
         var result: [String] = []
-        var inList = false
+        var inUnorderedList = false
+        var inOrderedList = false
         var listItems: [String] = []
         
         for line in lines {
-            if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
-                let item = String(line.dropFirst(2))
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            
+            if trimmedLine.hasPrefix("- ") || trimmedLine.hasPrefix("* ") || trimmedLine.hasPrefix("+ ") {
+                let item = String(trimmedLine.dropFirst(2))
                 listItems.append("<li>\(item)</li>")
-                inList = true
-            } else if line.range(of: #"^\d+\.\s"#, options: .regularExpression) != nil {
-                let item = line.replacingOccurrences(of: #"^\d+\.\s"#, with: "", options: .regularExpression)
+                if !inUnorderedList {
+                    if inOrderedList {
+                        result.append("</ol>")
+                        inOrderedList = false
+                    }
+                    inUnorderedList = true
+                }
+            } else if let regex = try? NSRegularExpression(pattern: #"^\d+\.\s"#),
+                      regex.firstMatch(in: trimmedLine, range: NSRange(location: 0, length: trimmedLine.count)) != nil {
+                let item = trimmedLine.replacingOccurrences(of: #"^\d+\.\s"#, with: "", options: .regularExpression)
                 listItems.append("<li>\(item)</li>")
-                inList = true
+                if !inOrderedList {
+                    if inUnorderedList {
+                        result.append("</ul>")
+                        inUnorderedList = false
+                    }
+                    inOrderedList = true
+                }
             } else {
-                if inList {
+                if inUnorderedList {
                     result.append("<ul>")
                     result.append(contentsOf: listItems)
                     result.append("</ul>")
+                    inUnorderedList = false
                     listItems.removeAll()
-                    inList = false
+                } else if inOrderedList {
+                    result.append("<ol>")
+                    result.append(contentsOf: listItems)
+                    result.append("</ol>")
+                    inOrderedList = false
+                    listItems.removeAll()
                 }
                 result.append(line)
             }
         }
         
-        if inList {
+        // Handle remaining list items
+        if inUnorderedList {
             result.append("<ul>")
             result.append(contentsOf: listItems)
             result.append("</ul>")
+        } else if inOrderedList {
+            result.append("<ol>")
+            result.append(contentsOf: listItems)
+            result.append("</ol>")
+        }
+        
+        return result.joined(separator: "\n")
+    }
+    
+    private static func convertTables(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        var result: [String] = []
+        var inTable = false
+        var tableRows: [String] = []
+        
+        for line in lines {
+            if line.contains("|") && !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                let cells = line.components(separatedBy: "|")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                
+                if !inTable {
+                    inTable = true
+                    tableRows.append("<table>")
+                }
+                
+                if line.contains("---") || line.contains("===") {
+                    // Skip separator row
+                    continue
+                }
+                
+                let cellsHTML = cells.map { "<td>\($0)</td>" }.joined()
+                tableRows.append("<tr>\(cellsHTML)</tr>")
+            } else {
+                if inTable {
+                    tableRows.append("</table>")
+                    result.append(contentsOf: tableRows)
+                    tableRows.removeAll()
+                    inTable = false
+                }
+                result.append(line)
+            }
+        }
+        
+        // Handle remaining table
+        if inTable {
+            tableRows.append("</table>")
+            result.append(contentsOf: tableRows)
+        }
+        
+        return result.joined(separator: "\n")
+    }
+    
+    private static func convertBlockquotes(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        var result: [String] = []
+        var inBlockquote = false
+        var blockquoteContent: [String] = []
+        
+        for line in lines {
+            if line.hasPrefix("> ") {
+                let content = String(line.dropFirst(2))
+                blockquoteContent.append(content)
+                if !inBlockquote {
+                    inBlockquote = true
+                }
+            } else {
+                if inBlockquote {
+                    result.append("<blockquote>\(blockquoteContent.joined(separator: "<br>"))</blockquote>")
+                    blockquoteContent.removeAll()
+                    inBlockquote = false
+                }
+                result.append(line)
+            }
+        }
+        
+        // Handle remaining blockquote
+        if inBlockquote {
+            result.append("<blockquote>\(blockquoteContent.joined(separator: "<br>"))</blockquote>")
+        }
+        
+        return result.joined(separator: "\n")
+    }
+    
+    private static func convertHorizontalRules(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        var result: [String] = []
+        
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            if trimmedLine.starts(with: "---") && trimmedLine.allSatisfy({ $0 == "-" }) {
+                result.append("<hr>")
+            } else {
+                result.append(line)
+            }
         }
         
         return result.joined(separator: "\n")
@@ -113,17 +293,20 @@ class MarkdownConverter {
         var currentParagraph: [String] = []
         
         for line in lines {
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            
+            if trimmedLine.isEmpty {
                 if !currentParagraph.isEmpty {
                     let paragraph = currentParagraph.joined(separator: " ")
-                    if !paragraph.hasPrefix("<") {
+                    if !paragraph.hasPrefix("<") && !paragraph.isEmpty {
                         result.append("<p>\(paragraph)</p>")
                     } else {
                         result.append(paragraph)
                     }
                     currentParagraph.removeAll()
                 }
-            } else if line.hasPrefix("<") {
+                result.append("")
+            } else if line.hasPrefix("<") || line.contains("<table>") || line.contains("</table>") {
                 if !currentParagraph.isEmpty {
                     let paragraph = currentParagraph.joined(separator: " ")
                     result.append("<p>\(paragraph)</p>")
@@ -137,7 +320,11 @@ class MarkdownConverter {
         
         if !currentParagraph.isEmpty {
             let paragraph = currentParagraph.joined(separator: " ")
-            result.append("<p>\(paragraph)</p>")
+            if !paragraph.hasPrefix("<") {
+                result.append("<p>\(paragraph)</p>")
+            } else {
+                result.append(paragraph)
+            }
         }
         
         return result.joined(separator: "\n")

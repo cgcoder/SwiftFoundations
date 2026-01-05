@@ -9,37 +9,22 @@ struct NoteEditorView: View {
     
     var body: some View {
         if let currentNote = note {
-            VStack(spacing: 0) {
-                HStack {
-                    TextField("Note Title", text: $editableTitle)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    
-                    Spacer()
-                    
-                    HStack {
-                        Button(showingPreview ? "Edit" : "Preview") {
-                            showingPreview.toggle()
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Save") {
-                            saveNote()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .padding()
-                
-                Divider()
-                
+            Group {
                 if showingPreview {
-                    MarkdownPreviewView(content: editableContent)
+                    MarkdownPreviewView(content: editableContent, noteId: currentNote.id.uuidString)
                 } else {
                     TextEditor(text: $editableContent)
                         .font(.system(.body, design: .monospaced))
                         .padding()
+                }
+            }
+            .navigationTitle(editableTitle)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(showingPreview ? "Edit" : "Preview") {
+                        showingPreview.toggle()
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
             .onAppear {
@@ -52,6 +37,9 @@ struct NoteEditorView: View {
                     editableTitle = newNote.title
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .saveNote)) { _ in
+                saveNote()
+            }
         } else {
             VStack {
                 Image(systemName: "doc.text")
@@ -62,14 +50,17 @@ struct NoteEditorView: View {
                     .font(.title2)
                     .foregroundColor(.secondary)
             }
+            .navigationTitle("GitNote")
         }
     }
     
     private func saveNote() {
         guard var currentNote = note else { return }
         
+        // Clear cache for this note since content is being updated
+        MarkdownCacheManager.shared.clearCacheForNote(currentNote.id.uuidString)
+        
         currentNote.content = editableContent
-        currentNote.title = editableTitle
         currentNote.modifiedAt = Date()
         
         noteManager.saveNote(currentNote)

@@ -14,5 +14,17 @@ struct GitNoteApp: App {
             ContentView()
         }
         .windowResizability(.contentSize)
+        .commands {
+            CommandMenu("Note") {
+                Button("Save Note") {
+                    NotificationCenter.default.post(name: .saveNote, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: .command)
+            }
+        }
     }
+}
+
+extension Notification.Name {
+    static let saveNote = Notification.Name("saveNote")
 }

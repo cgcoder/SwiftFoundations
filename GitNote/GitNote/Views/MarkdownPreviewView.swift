@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MarkdownPreviewView: NSViewRepresentable {
     let content: String
+    let noteId: String
     
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -11,7 +12,7 @@ struct MarkdownPreviewView: NSViewRepresentable {
     }
     
     func updateNSView(_ webView: WKWebView, context: Context) {
-        let htmlContent = MarkdownConverter.toHTML(content)
+        let htmlContent = MarkdownConverter.toHTML(content, noteId: noteId)
         webView.loadHTMLString(htmlContent, baseURL: nil)
     }
     

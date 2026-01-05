@@ -39,7 +39,7 @@ class NoteManager: ObservableObject {
         notes.removeAll()
         
         loadFoldersRecursively(at: rootURL, relativePath: "")
-        loadNotesRecursively(at: rootURL, relativePath: "")
+        loadNoteMetadataRecursively(at: rootURL, relativePath: "")
     }
     
     private func loadFoldersRecursively(at url: URL, relativePath: String) {
@@ -56,6 +56,7 @@ class NoteManager: ObservableObject {
                     folders.append(folder)
                     
                     loadFoldersRecursively(at: item, relativePath: folderPath)
+                    print("\(folder.name) -> \(folder.parentPath ?? "nil")")
                 }
             }
         } catch {
@@ -63,7 +64,7 @@ class NoteManager: ObservableObject {
         }
     }
     
-    private func loadNotesRecursively(at url: URL, relativePath: String) {
+    private func loadNoteMetadataRecursively(at url: URL, relativePath: String) {
         do {
             let contents = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey])
             
@@ -72,27 +73,53 @@ class NoteManager: ObservableObject {
                 if fileManager.fileExists(atPath: item.path, isDirectory: &isDirectory) {
                     if isDirectory.boolValue {
                         let folderPath = relativePath.isEmpty ? item.lastPathComponent : "\(relativePath)/\(item.lastPathComponent)"
-                        loadNotesRecursively(at: item, relativePath: folderPath)
+                        loadNoteMetadataRecursively(at: item, relativePath: folderPath)
                     } else if item.pathExtension.lowercased() == "json" {
-                        loadNote(from: item, folderPath: relativePath)
+                        loadNoteMetadata(from: item, folderPath: relativePath)
                     }
                 }
             }
         } catch {
-            print("Error loading notes: \(error)")
+            print("Error loading note metadata: \(error)")
         }
     }
     
-    private func loadNote(from url: URL, folderPath: String) {
+    private func loadNoteMetadata(from url: URL, folderPath: String) {
         do {
             let data = try Data(contentsOf: url)
             let noteContent = try JSONDecoder().decode(NoteContent.self, from: data)
             let fileName = url.lastPathComponent
             
-            let note = Note(title: noteContent.title, content: noteContent.body, fileName: fileName, folderPath: folderPath)
+            let note = Note(title: noteContent.title, content: "", fileName: fileName, folderPath: folderPath, isContentLoaded: false)
+            print("\(note.fileName) -> \(note.folderPath)")
             notes.append(note)
         } catch {
-            print("Error loading note \(url.lastPathComponent): \(error)")
+            print("Error loading note metadata \(url.lastPathComponent): \(error)")
+        }
+    }
+    
+    func loadNoteContent(_ note: Note) -> Note? {
+        guard let rootURL = rootDirectory else { return nil }
+        
+        let folderURL = note.folderPath.isEmpty ? rootURL : rootURL.appendingPathComponent(note.folderPath)
+        let fileURL = folderURL.appendingPathComponent(note.fileName)
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let noteContent = try JSONDecoder().decode(NoteContent.self, from: data)
+            
+            var updatedNote = note
+            updatedNote.content = noteContent.body
+            updatedNote.isContentLoaded = true
+            
+            if let index = notes.firstIndex(where: { $0.id == note.id }) {
+                notes[index] = updatedNote
+            }
+            
+            return updatedNote
+        } catch {
+            print("Error loading note content \(note.fileName): \(error)")
+            return nil
         }
     }
     
@@ -111,7 +138,7 @@ class NoteManager: ObservableObject {
             let data = try JSONEncoder().encode(noteContent)
             try data.write(to: fileURL)
             
-            let note = Note(title: title, content: "", fileName: fileName, folderPath: folderPath)
+            let note = Note(title: title, content: "", fileName: fileName, folderPath: folderPath, isContentLoaded: true)
             notes.append(note)
             return note
         } catch {

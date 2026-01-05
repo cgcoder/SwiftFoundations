@@ -8,12 +8,13 @@ struct Note: Identifiable, Codable, Equatable, Hashable {
     var folderPath: String
     var createdAt: Date
     var modifiedAt: Date
+    var isContentLoaded: Bool = false
     
     var filePath: String {
         return folderPath.isEmpty ? fileName : "\(folderPath)/\(fileName)"
     }
     
-    init(title: String, content: String = "", fileName: String, folderPath: String = "") {
+    init(title: String, content: String = "", fileName: String, folderPath: String = "", isContentLoaded: Bool = false) {
         self.id = UUID()
         self.title = title
         self.content = content
@@ -21,6 +22,7 @@ struct Note: Identifiable, Codable, Equatable, Hashable {
         self.folderPath = folderPath
         self.createdAt = Date()
         self.modifiedAt = Date()
+        self.isContentLoaded = isContentLoaded
     }
     
     static func == (lhs: Note, rhs: Note) -> Bool {

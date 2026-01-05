@@ -7,9 +7,6 @@ struct NoteFolder: Identifiable, Hashable {
     var parentPath: String?
     
     var fullPath: String {
-        if let parent = parentPath, !parent.isEmpty {
-            return "\(parent)/\(path)"
-        }
         return path
     }
     
